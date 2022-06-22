@@ -1,0 +1,903 @@
+---
+title: "code_4407409"
+author: "Shreya Agrawal"
+date: "4/6/2022"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Packages 
+```{r}  
+library(glmnet) 
+library(ISLR2)  
+library(tidyverse) 
+library(ggplot2)   
+library(leaps) 
+library(tree) 
+library(randomForest)  
+library(pls) 
+library(gam)
+library (splines) 
+library(ggplot2)  
+library(boot) 
+library(bootstrap)
+
+
+#knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+``` 
+
+Loading the data in
+```{r}  
+bikeData <- read.csv("C:\\Users\\shrey\\OneDrive - University of Pittsburgh\\1361-Data Science\\Final Project\\train.csv")  
+``` 
+
+Data Tidying
+```{r} 
+bikeData <- na.omit(bikeData)
+head(bikeData) 
+```  
+
+```{r}
+#Splitting the Date variable into three variables-Month, Day, Year
+bikeData_new <-separate(bikeData,Date,c("Day","Month","Year"),sep="/")
+bikeData_new$Day = as.numeric(bikeData_new$Day)
+bikeData_new$Month = as.numeric(bikeData_new$Month)
+bikeData_new$Year = as.numeric(bikeData_new$Year)  
+```  
+
+```{r}
+head(bikeData_new) 
+``` 
+
+Splitting the data into training and testing set  
+```{r}  
+set.seed(1)
+train <- bikeData_new %>% sample_frac(size = 0.8) 
+test <- bikeData_new %>% setdiff(train) 
+
+```  
+
+Removing ID variable because it is insignificant to the response-Counts. 
+```{r}
+train <- train %>% select(-ID) 
+test <- test %>% select(-ID)
+```  
+
+Finding the best linear models to use by measuring RSS, CP, and BIC.  
+
+From the analysis below, I have discovered that using 15 predictors(if we consider each class of each categorical predictor as an individual predictor) results in the minimum possible cP value. These 15 predictors are-"Day","Month","Year","Hour","Temperature","Humidity","Wind","Solar","Rainfall","Snowfall","SeaonsSpring","SeasonsSummer","SeasonsWinter","HolidayNo Holiday","FunctioningYes 
+
+In other words, a model built using this data will perform best using the variables-Day,Month,Year,Hour,Temperature,Humidity,Wind,Solar,Rainfall,Snowfall,Seasons,Holiday,Functioning
+
+```{r}  
+#Finding the best linear models and significant predictors  
+regfit <- regsubsets (Count ~ ., data = train ,
+nvmax = 15,really.big = T)  
+summary(regfit)
+
+```  
+
+```{r}
+reg.sum <- summary(regfit) 
+reg.sum.bestRSS <- reg.sum$rss 
+which.min(reg.sum.bestRSS) 
+plot(reg.sum.bestRSS) 
+coef(regfit,which.min(reg.sum.bestRSS))  
+``` 
+
+```{r}
+reg.sum <- summary(regfit) 
+reg.sum.bestCP <- reg.sum$cp 
+which.min(reg.sum.bestCP) 
+plot(reg.sum.bestCP) 
+coef(regfit,which.min(reg.sum.bestCP)) 
+``` 
+
+```{r}
+reg.sum <- summary(regfit) 
+reg.sum.bestBIC <- reg.sum$bic 
+which.min(reg.sum.bestBIC) 
+plot(reg.sum.bestBIC) 
+coef(regfit,which.min(reg.sum.bestBIC)) 
+```  
+
+
+Getting rid of insignificant variables based on results of best subset selection
+```{r}  
+tr <- train %>% select(-Visibility,-Dew) 
+te <- test %>% select(-Visibility,-Dew)
+```
+
+
+Multinomial Linear Regression Model 
+The test MSE of this model of all the variables is 682003. The test MSE of this model when only the significant predictors are used is 682062. The test MSE of this model when only the most significant predictor-Temperature-is used, is 562903.4
+```{r}    
+#Using all of the predictor terms
+linear.mod <- lm(Count ~., data = train) 
+linear.pred <- predict(linear.mod,data=test)   
+linear.mse <- mean ((test$Count - linear.pred)^2)  
+linear.mse 
+```   
+
+```{r}    
+#Using significant predictor terms based on best subset selection
+linear.mod <- lm(Count ~., data = tr) 
+linear.pred <- predict(linear.mod,data=te)   
+linear.mse <- mean ((te$Count - linear.pred)^2)  
+linear.mse 
+```  
+
+```{r}   
+#Multinomial Linear Regression with only the most significant predictor
+linear.mod <- lm(Count ~ Temperature, data = train) 
+linear.pred <- predict(linear.mod,data=test)   
+linear.mse <- mean ((test$Count - linear.pred)^2)  
+linear.mse  
+
+``` 
+ 
+Ridge Regression Model   
+The MSE with of this model using all predictors is 189448.4, the MSE when only the significant variables are used is 190706.7, and the MSE when only the most significant variable- Temperature variable is used, is 306187.2
+```{r} 
+set.seed(1)  
+
+#Converting test and training data into matrices so that the glmnet function can be used
+train_x <- model.matrix(Count ~.,train)
+train_y <- train$Count  
+
+test_x <- model.matrix(Count ~.,test)
+test_y <- test$Count
+
+#Doing cross validation to find the best lambda to use for ridge
+cv_ridge  <- cv.glmnet(train_x, train_y, alpha=0)
+best_lambda_ridge <- cv_ridge$lambda.min 
+
+#Fitting ridge model with best lambda value 
+ridge.mod <- glmnet(train_x,train_y,alpha=0,lambda = best_lambda_ridge)
+
+#Calculating test error(test MSE)  
+ridge.pred <- predict(ridge.mod, s=best_lambda_ridge,newx = test_x)  
+ridge.mse <- mean ((test$Count - ridge.pred)^2)  
+ridge.mse  
+
+```   
+
+```{r} 
+set.seed(1)
+train_x <- model.matrix(Count ~.,tr)
+train_y <- tr$Count  
+
+test_x <- model.matrix(Count ~.,te)
+test_y <- te$Count
+
+#Doing cross validation to find the best lambda to use for ridge
+cv_ridge  <- cv.glmnet(train_x, train_y, alpha=0)
+best_lambda_ridge <- cv_ridge$lambda.min 
+
+#Fitting ridge model with best lambda value 
+ridge.mod <- glmnet(train_x,train_y,alpha=0,lambda = best_lambda_ridge)
+
+#Calculating test error(test MSE)  
+ridge.pred <- predict(ridge.mod, s=best_lambda_ridge,newx = test_x)  
+ridge.mse <- mean ((te$Count - ridge.pred)^2)  
+ridge.mse
+``` 
+
+```{r} 
+set.seed(1)
+train_x <- model.matrix(Count ~ Temperature,train)
+train_y <- train$Count  
+
+test_x <- model.matrix(Count ~ Temperature,test)
+test_y <- test$Count
+
+#Doing cross validation to find the best lambda to use for ridge
+cv_ridge  <- cv.glmnet(train_x, train_y, alpha=0)
+best_lambda_ridge <- cv_ridge$lambda.min 
+
+#Fitting ridge model with best lambda value 
+my_ridge <- glmnet(train_x,train_y,alpha=0,lambda = best_lambda_ridge)
+
+#Calculating test error(test MSE)  
+ridge.pred <- predict(my_ridge, s=best_lambda_ridge,newx = test_x)  
+ridge.mse <- mean ((test$Count - ridge.pred)^2)  
+ridge.mse
+``` 
+
+
+Lasso Model   
+The MSE of this model with all predictors is 204254.3, with only most significant predictors is 205228.5, and the MSE using this model with only the Temperature variable is 307582.2
+```{r}  
+set.seed(1)
+train_x <- model.matrix(Count ~.,train)
+train_y <- train$Count  
+
+test_x <- model.matrix(Count ~.,test)
+test_y <- test$Count
+
+#Doing cross validation to find the best lambda to use for lasso
+cv_lasso  <- cv.glmnet(train_x, train_y, alpha=1)
+best_lambda_lasso <- cv_lasso$lambda.min 
+
+#Fitting lasso model with best lambda value 
+my_lasso <- glmnet(train_x,train_y,alpha=1,lambda = best_lambda_ridge)
+
+#Calculating test error(test MSE)  
+lasso.pred <- predict(my_lasso, s=best_lambda_ridge,newx = test_x)  
+lasso.mse <- mean ((test$Count - lasso.pred)^2)  
+lasso.mse
+```  
+
+```{r}  
+set.seed(1)
+train_x <- model.matrix(Count ~.,tr)
+train_y <- tr$Count  
+
+test_x <- model.matrix(Count ~.,te)
+test_y <- te$Count
+
+#Doing cross validation to find the best lambda to use for lasso
+cv_lasso  <- cv.glmnet(train_x, train_y, alpha=1)
+best_lambda_lasso <- cv_lasso$lambda.min 
+
+#Fitting lasso model with best lambda value 
+my_lasso <- glmnet(train_x,train_y,alpha=1,lambda = best_lambda_ridge)
+
+#Calculating test error(test MSE)  
+lasso.pred <- predict(my_lasso, s=best_lambda_ridge,newx = test_x)  
+lasso.mse <- mean ((te$Count - lasso.pred)^2)  
+lasso.mse
+```  
+
+```{r}  
+set.seed(1)
+train_x <- model.matrix(Count ~ Temperature,train)
+train_y <- train$Count  
+
+test_x <- model.matrix(Count ~ Temperature,test)
+test_y <- test$Count
+
+#Doing cross validation to find the best lambda to use for lasso
+cv_lasso  <- cv.glmnet(train_x, train_y, alpha=1)
+best_lambda_lasso <- cv_lasso$lambda.min 
+
+#Fitting lasso model with best lambda value 
+my_lasso <- glmnet(train_x,train_y,alpha=1,lambda = best_lambda_ridge)
+
+#Calculating test error(test MSE)  
+lasso.pred <- predict(my_lasso, s=best_lambda_ridge,newx = test_x)  
+lasso.mse <- mean ((test$Count - lasso.pred)^2)  
+lasso.mse
+``` 
+
+PCR-Dimension Reduction  
+The MSE of this model using all predictors is 682003. The MSE using only the most significant predictors is 667469.9. Upon conducting a cross validation test, I also discovered that the ncomp with minimum MSE is 1. Furthermore, when I fit this model with only the most significant variable-Temperature-, the MSE was 531729.7
+```{r,warning=FALSE} 
+#Fitting PCR model, reducing number of predictors by using transformations of multiple predictors 
+
+train_x <- model.matrix(Count ~.,train)
+train_y <- train$Count  
+
+test_x <- model.matrix(Count ~.,test)
+test_y <- test$Count 
+
+ 
+set.seed(1) 
+pcr.fit <- pcr(Count~.,data = train,scale=TRUE,validation="CV") 
+#Analyzing the resulting fit and cross validation results(which M produces least error) 
+summary(pcr.fit) 
+
+#Plotting the number of components(M) with the cross validation MSEP. Based on the plot and summary, the lowest cross-validation error occurs when M = 18. 
+validationplot(pcr.fit,val.type = "MSEP")    
+pcr.pred <- predict (pcr.fit,newx=test_x, ncomp = 17)
+pcr.mse <- mean (( test_y - pcr.pred ) ^2)  
+pcr.mse
+``` 
+
+```{r,warning=FALSE} 
+#Fitting PCR model with only most significant predictors
+
+train_x <- model.matrix(Count ~.,tr)
+train_y <- tr$Count  
+
+test_x <- model.matrix(Count ~.,te)
+test_y <- te$Count  
+
+ 
+set.seed(1) 
+pcr.fit <- pcr(Count~.,data = tr,scale=TRUE,validation="CV") 
+#Analyzing the resulting fit and cross validation results(which M produces least error) 
+summary(pcr.fit) 
+
+#Plotting the number of components(M) with the cross validation MSEP. Based on the plot and summary, the lowest cross-validation error occurs when M = 13. 
+validationplot(pcr.fit,val.type = "MSEP")    
+pcr.pred <- predict (pcr.fit,newx=test_x, ncomp = 13)
+pcr.mse <- mean (( test_y - pcr.pred ) ^2)  
+pcr.mse
+```
+
+```{r,warning=FALSE}
+#Finding the ncomp which gives the minimum mse
+minMSE = 1000000000  
+optNComp = 0
+
+for (i in 1:15) 
+{
+  pcr.pred <- predict (pcr.fit,newx=test_x, ncomp = i)
+  pcr.mse <- mean (( test_y - pcr.pred ) ^2) 
+  if(pcr.mse < minMSE) 
+  {  
+    minMSE = pcr.mse 
+    optNComp = i
+  }
+}  
+
+#Optimal degree was found to be 1
+optNComp 
+
+#Temperature is automatically chosen to be the predictor when ncomp is 1 because it is the most signficant predictor
+pcr.mse = minMSE  
+pcr.mse
+
+
+```
+
+
+PLS   
+The MSE is 682003 when all variables are used, is 682061.8 when only most significant predictors are considered, and is 562903.4 when only most signficant predictor-Temperature- is used to build the model. 
+```{r} 
+ 
+
+train_x <- model.matrix(Count ~.,train)
+train_y <- train$Count  
+
+test_x <- model.matrix(Count ~.,test)
+test_y <- test$Count   
+
+set.seed(1) 
+pls.fit <- plsr(Count~.,data = train,scale=TRUE,validation="CV") 
+#Analyzing the resulting fit and cross validation results(which M produces least error) 
+summary(pls.fit) 
+
+
+#Plotting the number of components(M) with the cross validation MSE. Based on the plot, the lowest cross-validation error occurs when M = 5
+validationplot(pls.fit,val.type = "MSEP")  
+
+#Computing the test MSE of PLS with M=5 
+pls.pred <- predict (pls.fit, newx=test_x, ncomp = 17)
+pls.mse <- mean ((test$Count - pls.pred)^2)  
+pls.mse
+
+```   
+
+```{r} 
+
+  
+
+train_x <- model.matrix(Count ~.,tr)
+train_y <- tr$Count  
+
+test_x <- model.matrix(Count ~.,te)
+test_y <- te$Count   
+
+set.seed(1) 
+pls.fit <- plsr(Count~.,data = tr,scale=TRUE,validation="CV") 
+#Analyzing the resulting fit and cross validation results(which M produces least error) 
+summary(pls.fit) 
+
+
+#Plotting the number of components(M) with the cross validation MSE. Based on the plot, the lowest cross-validation error occurs when M = 5
+validationplot(pls.fit,val.type = "MSEP")  
+
+#Computing the test MSE of PLS with M=5 
+pls.pred <- predict (pls.fit, newx=test_x, ncomp = 13)
+pls.mse <- mean ((test$Count - pls.pred)^2)  
+pls.mse
+
+```  
+
+```{r} 
+set.seed(1) 
+pls.fit <- plsr(Count~Temperature,data = train,scale=TRUE,validation="CV") 
+#Analyzing the resulting fit and cross validation results(which M produces least error) 
+#summary(pls.fit) 
+
+
+#Plotting the number of components(M) with the cross validation MSE. Based on the plot, the lowest cross-validation error occurs when M = 5
+validationplot(pls.fit,val.type = "MSEP")  
+
+#Computing the test MSE of PLS with M=5 
+pls.pred <- predict (pls.fit, newx=test_x, ncomp = 1)
+pls.mse <- mean ((test$Count - pls.pred)^2)  
+pls.mse
+```  
+
+
+Cubic Regression Splines  
+The MSE of a cubic regression spline model with 4 degrees of freedom is 301163.1
+```{r} 
+#We use temperature as the predictor variable because based on best subset selection, that was the most significant variable
+min.mse = 10000000000 
+optDegree = 0
+set.seed(1) 
+
+#Using a for loop to find the optimal degrees of freedom which gives minimum MSE
+for(i in 1:20) 
+{  
+  spline.mod <- lm(Count ~ bs(Temperature,df=i),data=train)
+  spline.pred <- predict(spline.mod,test)
+  curr.mse = mean((test$Count - spline.pred)^2) 
+  if(curr.mse < min.mse) 
+  {  
+    min.mse = curr.mse 
+    optDegree = i
+  }
+} 
+spline.mse = min.mse  
+
+#Optimal degree was found to be 4 degrees of freedom
+optDegree
+spline.mse
+``` 
+
+Smoothing Spline 
+The MSE of a cubic smoothing spline with 6 degrees of freedom is 618431.1
+```{r,warning=FALSE}
+
+#We use temperature as the predictor variable because based on best subset selection, that was the most significant variable
+
+min.mse = 10000000000 
+optDegree = 0
+set.seed(1)  
+
+#Using a for loop to find the optimal degrees of freedom which gives minimum MSE
+for(i in 1:20) 
+{  
+  smooth.spline.mod <- smooth.spline(train[,'Temperature'],train[,'Count'],df=i,cv=TRUE)
+  smooth.spline.pred <- predict(smooth.spline.mod,test[,'Temperature']) 
+  smooth.spline.pred <- unlist(smooth.spline.pred) 
+  smooth.spline.pred <- as.numeric(smooth.spline.pred)
+  smooth.curr.mse = mean((test[,'Count'] - smooth.spline.pred)^2) 
+  if(smooth.curr.mse < min.mse) 
+  {  
+    min.mse = smooth.curr.mse 
+    optDegree = i
+  }
+} 
+smooth.spline.mse = min.mse  
+
+#Optimal degree was found to be 6 degrees of freedom
+optDegree
+smooth.spline.mse
+```
+
+GAM with regression splines 
+I used only the most significant predictors with degrees of freedom of 4 for each predictor and found the MSE to be 144964.5. I used the single most significant predictor with degrees of freedom of 4 and found the MSE to be 301682.3
+
+```{r,warning=FALSE}   
+#Including Year variable causes error
+set.seed(1)  
+
+gam.mod <- lm(Count ~ ns(Day,4)+ ns(Month,4) + ns( Temperature , 4) + ns(Hour , 4) + ns(Wind,4) + ns(Snowfall,4) + ns(Humidity,4) + ns(Solar,4) + ns(Rainfall,4)  + Seasons + Functioning + Holiday,
+data = train ) 
+gam.pred <- predict(gam.mod,newdata=test)  
+gam.mse = mean((test$Count - gam.pred)^2)  
+gam.mse
+```  
+
+```{r,warning=FALSE}  
+set.seed(1)
+gam.mod <- lm(Count ∼ ns( Temperature , 4), data = train ) 
+gam.pred <- predict(gam.mod,newdata=test)  
+gam.mse = mean((test$Count - gam.pred)^2)  
+gam.mse
+```  
+
+GAM with smoothing splines 
+I used the 7 most significant predictors with degrees of freedom of 6 for each predictor and found the MSE to be 188317.2. I used the single most significant predictor with degrees of freedom of 6 and found the MSE to be 305366.3
+```{r,warning=FALSE}   
+set.seed(1)
+gam.mod <- lm(Count ∼ s(Day,6) + s(Month,6) + s( Temperature , 6) + s(Hour , 6) + s(Wind,6) + s(Snowfall,6) + s(Humidity,6) + s(Solar,6) + s(Rainfall,6) + Seasons + Functioning + Holiday,
+data = train ) 
+gam.pred <- predict(gam.mod,newdata=test)  
+gam.mse = mean((test$Count - gam.pred)^2)  
+gam.mse
+```  
+
+```{r,warning=FALSE}  
+set.seed(1)
+gam.mod <- lm(Count ∼ s( Temperature , 6), data = train ) 
+gam.pred <- predict(gam.mod,newdata=test)  
+gam.mse = mean((test$Count - gam.pred)^2)  
+gam.mse
+```
+
+Tree model  
+The MSE of a full tree model with all predictors is 199860.7 
+```{r} 
+set.seed(1)
+tree.mod <- tree(Count~.,data=train)   
+#summary(tree.mod) 
+#plot(tree.mod) 
+#text(tree.mod,pretty=0) 
+#tree.mod
+
+#Finding the MSE 
+tree.pred <- predict(tree.mod,test)  
+mean((tree.pred-test$Count)^2)
+``` 
+
+Tree Model with Pruning  
+Pruning didn't improve the error, the MSE is still the exact same as the tree model's -> 199860.7
+```{r,warning=FALSE} 
+#Using cross-validation in order to determine the optimal level of tree complexity. 
+set.seed(1)  
+
+#Based on the plot, 11 is the optimal number of nodes, gives the least amount of cross validation error
+cv.mod <- cv.tree(tree.mod) 
+plot(cv.mod, type = "b") 
+abline(h = min(cv.mod$dev) + 0.2 * sd(cv.mod$dev), col = "blue", lty = 2)
+points(cv.mod$size[which.min(cv.mod$dev)], min(cv.mod$dev), 
+       col = "#BC3C29FF", cex = 2, pch = 20) 
+
+```  
+
+```{r}   
+#Pruning the tree model to use only 11 nodes
+set.seed(1)
+prune.mod = prune.tree(tree.mod, best = 11)
+plot(prune.mod)
+text(prune.mod, pretty = 0)   
+
+prune.pred <- predict(prune.mod,test)  
+mean((prune.pred-test$Count)^2)
+``` 
+
+Bagging   
+The MSE of the Bagging model is 57543.61
+```{r}  
+bag.mod <- randomForest(Count~.,data=train,mtry = 16,importance = TRUE)  
+ 
+#Calculating test MSE 
+bag.pred <- predict(bag.mod,test)  
+MSE <- mean ((test$Count - bag.pred)^2)  
+MSE 
+```
+
+Random Forest  
+The optimal mtry value was found to be 6, and the MSE of the Random Forest model with this mtry is 52028.69
+```{r}  
+minMSE = 100000000000000  
+opt_mtry = 0
+for(i in 1:16)
+{
+  randfor.mod <- randomForest(Count~.,data=train,mtry = i,importance = TRUE)  
+ 
+  #Calculating test MSE 
+  randfor.pred <- predict(randfor.mod,test)   
+  MSE <- mean ((test$Count - randfor.pred)^2)  
+  if(MSE < minMSE)
+  {
+    minMSE = MSE
+    opt_mtry = i  
+  }
+}
+
+minMSE 
+opt_mtry
+```  
+
+Temperature had the highest IncNodePurity of 658608257.9 while Hour had the highest  %IncMSE of 212.669337. 
+```{r}  
+importance(randfor.mod)
+```
+
+Creating null model to compare MSE to best model's MSE. The MSE of this null model is very high-> 2643199. It was expected that the MSE of this model be extremely high because it is a null model and randomly assigns predictions. 
+```{r,warning=FALSE}  
+range(train$Count)  
+testLength = nrow(test) 
+null.pred = numeric()  
+
+#Using sample function to randomly assign each observation in the test dataset a Count value in the same range as the range of the Count values of the training dataset. 
+for(i in 1:testLength) 
+{  
+  null.pred[i] = sample(0:3556,replace = T) 
+}
+
+#Finding the MSE of the null model
+MSE <- mean ((test$Count - null.pred)^2)   
+MSE
+
+``` 
+
+Using best model to predict actual test observations 
+```{r,warning=FALSE} 
+#GAM with Regression Splines using only the most significant predictors seemed to perform best out of all the models 
+
+
+#Loading data in 
+testData <- read.csv("testData.csv")   
+test.pred <- predict(gam.mod,newdata=testData)   
+#test.pred 
+test.pred <- data.frame(test.pred)
+
+write.csv(test.pred,"testing_predictions_4407409.csv")
+
+``` 
+
+Running Permutation Test on each of the predictors using Random Forests in order to find out which predictors are most significant and how significant they are. 
+
+The variables are Day,Month,Year,Hour,Temperature,Humidity,Wind,Solar,Rainfall,Snowfall,Seasons,Holiday,Functioning, Dew, Visibility
+```{r,warning=FALSE,eval=FALSE}  
+mse.perm <- numeric() 
+set.seed(1) 
+for (i in 1:15) 
+{  
+  if(i == 1)  
+  {  
+    shuffleTrain = train
+    shuffleTrain$Day = sample(train$Day,replace = FALSE)   
+    randfor.mod <- randomForest(Count~.,data=shuffleTrain,mtry = 8,importance = TRUE) 
+    
+    #Calculating test MSE 
+    randfor.pred <- predict(randfor.mod,test)   
+    MSE <- mean ((test$Count - randfor.pred)^2)  
+    mse.perm[i] <- MSE
+  }  
+  else if(i == 2)
+  {  
+    shuffleTrain = train
+    shuffleTrain$Month = sample(train$Month,replace = FALSE)   
+    randfor.mod <- randomForest(Count~.,data=shuffleTrain,mtry = 8,importance = TRUE) 
+    
+    #Calculating test MSE 
+    randfor.pred <- predict(randfor.mod,test)   
+    MSE <- mean ((test$Count - randfor.pred)^2)  
+    mse.perm[i] <- MSE
+  }   
+  else if(i == 3 )
+  {  
+    shuffleTrain = train
+    shuffleTrain$Year = sample(train$Year,replace = FALSE)   
+    randfor.mod <- randomForest(Count~.,data=shuffleTrain,mtry = 8,importance = TRUE) 
+    
+    #Calculating test MSE 
+    randfor.pred <- predict(randfor.mod,test)   
+    MSE <- mean ((test$Count - randfor.pred)^2)  
+    mse.perm[i] <- MSE
+  }   
+  else if(i == 4)
+  {  
+    shuffleTrain = train
+    shuffleTrain$Hour = sample(train$Hour,replace = FALSE)   
+    randfor.mod <- randomForest(Count~.,data=shuffleTrain,mtry = 8,importance = TRUE) 
+    
+    #Calculating test MSE 
+    randfor.pred <- predict(randfor.mod,test)   
+    MSE <- mean ((test$Count - randfor.pred)^2)  
+    mse.perm[i] <- MSE
+  }   
+  else if(i == 5)
+  {  
+    shuffleTrain = train
+    shuffleTrain$Temperature = sample(train$Temperature,replace = FALSE)   
+    randfor.mod <- randomForest(Count~.,data=shuffleTrain,mtry = 8,importance = TRUE) 
+    
+    #Calculating test MSE 
+    randfor.pred <- predict(randfor.mod,test)   
+    MSE <- mean ((test$Count - randfor.pred)^2)  
+    mse.perm[i] <- MSE
+  }   
+  else if(i == 6)
+  {  
+    shuffleTrain = train
+    shuffleTrain$Humidity = sample(train$Humidity,replace = FALSE)   
+    randfor.mod <- randomForest(Count~.,data=shuffleTrain,mtry = 8,importance = TRUE) 
+    
+    #Calculating test MSE 
+    randfor.pred <- predict(randfor.mod,test)   
+    MSE <- mean ((test$Count - randfor.pred)^2)  
+    mse.perm[i] <- MSE
+  }   
+  else if(i == 7)
+  {  
+    shuffleTrain = train
+    shuffleTrain$Wind = sample(train$Wind,replace = FALSE)   
+    randfor.mod <- randomForest(Count~.,data=shuffleTrain,mtry = 8,importance = TRUE) 
+    
+    #Calculating test MSE 
+    randfor.pred <- predict(randfor.mod,test)   
+    MSE <- mean ((test$Count - randfor.pred)^2)  
+    mse.perm[i] <- MSE
+  }   
+  else if(i == 8)
+  {  
+    shuffleTrain = train
+    shuffleTrain$Solar = sample(train$Solar,replace = FALSE)   
+    randfor.mod <- randomForest(Count~.,data=shuffleTrain,mtry = 8,importance = TRUE) 
+    
+    #Calculating test MSE 
+    randfor.pred <- predict(randfor.mod,test)   
+    MSE <- mean ((test$Count - randfor.pred)^2)  
+    mse.perm[i] <- MSE
+  }   
+  else if(i == 9)
+  {  
+    shuffleTrain = train
+    shuffleTrain$Rainfall = sample(train$Rainfall,replace = FALSE)   
+    randfor.mod <- randomForest(Count~.,data=shuffleTrain,mtry = 8,importance = TRUE) 
+    
+    #Calculating test MSE 
+    randfor.pred <- predict(randfor.mod,test)   
+    MSE <- mean ((test$Count - randfor.pred)^2)  
+    mse.perm[i] <- MSE
+  }  
+  else if(i == 10)
+  {  
+    shuffleTrain = train
+    shuffleTrain$Snowfall = sample(train$Snowfall,replace = FALSE)   
+    randfor.mod <- randomForest(Count~.,data=shuffleTrain,mtry = 8,importance = TRUE) 
+    
+    #Calculating test MSE 
+    randfor.pred <- predict(randfor.mod,test)   
+    MSE <- mean ((test$Count - randfor.pred)^2)  
+    mse.perm[i] <- MSE
+  }   
+  else if(i == 11) 
+  {  
+    shuffleTrain = train
+    shuffleTrain$Seasons = sample(train$Seasons,replace = FALSE)   
+    randfor.mod <- randomForest(Count~.,data=shuffleTrain,mtry = 8,importance = TRUE) 
+    
+    #Calculating test MSE 
+    randfor.pred <- predict(randfor.mod,test)   
+    MSE <- mean ((test$Count - randfor.pred)^2)  
+    mse.perm[i] <- MSE
+  } 
+  else if(i == 12) 
+  {  
+    shuffleTrain = train
+    shuffleTrain$Holiday = sample(train$Holiday,replace = FALSE)   
+    randfor.mod <- randomForest(Count~.,data=shuffleTrain,mtry = 8,importance = TRUE) 
+    
+    #Calculating test MSE 
+    randfor.pred <- predict(randfor.mod,test)   
+    MSE <- mean ((test$Count - randfor.pred)^2)  
+    mse.perm[i] <- MSE
+  } 
+  else if(i == 13) 
+  { 
+    shuffleTrain = train
+    shuffleTrain$Functioning = sample(train$Functioning,replace = FALSE)   
+    randfor.mod <- randomForest(Count~.,data=shuffleTrain,mtry = 8,importance = TRUE) 
+    
+    #Calculating test MSE 
+    randfor.pred <- predict(randfor.mod,test)   
+    MSE <- mean ((test$Count - randfor.pred)^2)  
+    mse.perm[i] <- MSE
+  } 
+  else if(i == 14) 
+  { 
+    shuffleTrain = train
+    shuffleTrain$Dew = sample(train$Dew,replace = FALSE)   
+    randfor.mod <- randomForest(Count~.,data=shuffleTrain,mtry = 8,importance = TRUE) 
+    
+    #Calculating test MSE 
+    randfor.pred <- predict(randfor.mod,test)   
+    MSE <- mean ((test$Count - randfor.pred)^2)  
+    mse.perm[i] <- MSE
+  } 
+  else 
+  {  
+    shuffleTrain = train
+    shuffleTrain$Visibility = sample(train$Visibility,replace = FALSE)   
+    randfor.mod <- randomForest(Count~.,data=shuffleTrain,mtry = 8,importance = TRUE) 
+    
+    #Calculating test MSE 
+    randfor.pred <- predict(randfor.mod,test)   
+    MSE <- mean ((test$Count - randfor.pred)^2)  
+    mse.perm[i] <- MSE
+  }
+} 
+plot(mse.perm,type="b",axes=F,ann=F,ylim=c(0,max(mse.perm)+1))
+axis(1,at=1:15,lab=names(train)[-1])
+axis(2,at=seq(0,max(mse.perm)+1,0.25),las=1)
+box() 
+
+```  
+
+
+Analyzing the trends between Count and most significant variables-Temperature,Hour,Seasons 
+
+Temperature
+```{r} 
+ggplot(data = bikeData_new) + 
+  geom_smooth(mapping = aes(x = Temperature, y = Count)) 
+
+range(bikeData_new$Temperature)
+``` 
+
+Hour 
+```{r} 
+ggplot(data = bikeData_new) + 
+  geom_smooth(mapping = aes(x = Hour, y = Count))
+``` 
+
+
+Continuing Data Exploration to better understand how season affects the bike counts  
+```{r}   
+bikeData_new %>%  
+  group_by(Seasons) %>%  
+  summarise()
+
+#Calculating the total counts for each season 
+
+
+##Winter
+only_Winter <- bikeData_new %>%  
+  select(Count,Seasons) %>%  
+  filter(Seasons == "Winter") 
+
+winter_sum = sum(only_Winter$Count) 
+winter_sum 
+
+##Summer
+only_Summer <- bikeData_new %>%  
+  select(Count,Seasons) %>%  
+  filter(Seasons == "Summer") 
+
+summer_sum = sum(only_Summer$Count) 
+summer_sum 
+
+##Spring
+only_Spring <- bikeData_new %>%  
+  select(Count,Seasons) %>%  
+  filter(Seasons == "Spring") 
+
+spring_sum = sum(only_Spring$Count) 
+spring_sum 
+
+##Fall 
+only_Autumn <- bikeData_new %>%  
+  select(Count,Seasons) %>%  
+  filter(Seasons == "Autumn") 
+
+autumn_sum = sum(only_Autumn$Count) 
+autumn_sum  
+
+Seasons_x <- c("Winter","Summer","Spring","Autumn") 
+Counts_y <- c(winter_sum,summer_sum,spring_sum,autumn_sum) 
+
+my_data <- data.frame(Seasons_x,Counts_y) 
+ggplot(data = my_data) + 
+  geom_bar(mapping = aes(x=reorder(Seasons_x,Counts_y),y=Counts_y),stat="identity") + 
+  labs(x = "Season",y = "Counts")
+``` 
+
+
+
+Analyzing the trends between Count and other variables(not considered the most significant) 
+
+
+```{r}
+ggplot(data = bikeData_new) + 
+  geom_smooth(mapping = aes(x = Month, y = Count))
+```
+
+```{r}
+ggplot(data = bikeData_new) + 
+  geom_bar(mapping = aes(x = Year, y = Count),stat = "identity")
+```
+
+
+
+
+
+
+
+
+
+
